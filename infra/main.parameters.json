@@ -1,0 +1,52 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+      "environmentName": {
+        "value": "${AZURE_ENV_NAME}"
+      },
+      "location": {
+        "value": "${AZURE_LOCATION}"
+      },
+      "copilotMetricsViewerExists": {
+        "value": "${SERVICE_COPILOT_METRICS_VIEWER_RESOURCE_EXISTS=false}"
+      },
+      "copilotMetricsSyncExists": {
+        "value": "${SERVICE_COPILOT_METRICS_SYNC_RESOURCE_EXISTS=false}"
+      },
+      "githubClientId":{ 
+        "value": "${NUXT_OAUTH_GITHUB_CLIENT_ID}",
+        "metadata": {
+          "description": "GitHub OAuth Client ID",
+          "secure": true
+        }
+      },
+      "githubClientSecret": {
+        "value": "${NUXT_OAUTH_GITHUB_CLIENT_SECRET}"
+      },
+      "sessionPassword": {
+        "value": "$(secretOrRandomPassword)"
+      },
+      "githubPAT": {
+        "value": "${NUXT_GITHUB_TOKEN}"
+      },
+      "githubScope": {
+        "value": "${NUXT_PUBLIC_SCOPE}"
+      },
+      "githubOrg": {
+        "value": "${NUXT_PUBLIC_GITHUB_ORG}"
+      },
+      "githubTeam": {
+        "value": "${NUXT_PUBLIC_GITHUB_TEAM}"
+      },
+      "githubEnt": {
+        "value": "${NUXT_PUBLIC_GITHUB_ENT}"
+      },
+      "principalId": {
+        "value": "${AZURE_PRINCIPAL_ID}"
+      },
+      "postgresAdminPassword": {
+        "value": "$(secretOrRandomPassword ${POSTGRES_ADMIN_PASSWORD})"
+      }
+    }
+}

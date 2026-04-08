@@ -1,0 +1,35 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/typescript-node
+{
+	"name": "GitHub Copilot Metrics Viewer Dev Environment",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspaces/copilot-metrics-viewer",
+	"features": {
+		"ghcr.io/devcontainers/features/azure-cli:1": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {}
+	},
+
+	// Forward ports for the app and PostgreSQL.
+	"forwardPorts": [3000, 5432],
+	"portsAttributes": {
+		"3000": {
+			"label": "App (Nuxt)",
+			"onAutoForward": "notify"
+		},
+		"5432": {
+			"label": "PostgreSQL",
+			"onAutoForward": "silent"
+		}
+	},
+
+	// Install dependencies on container creation. The database schema is initialized
+	// automatically on first app startup via initSchema() in server/storage/db.ts.
+	"postCreateCommand": "npm install",
+
+	// Configure tool-specific properties.
+	// "customizations": {},
+
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+}
