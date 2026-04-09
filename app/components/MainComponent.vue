@@ -213,6 +213,19 @@ export default defineNuxtComponent({
       };
 
       await this.fetchMetrics();
+      await this.fetchUserMetrics();
+    },
+    async fetchUserMetrics() {
+      try {
+        const options = Options.fromRoute(this.route, this.dateRange.since, this.dateRange.until);
+        const params = options.toParams();
+        const qs = new URLSearchParams(params).toString();
+        const data = await $fetch<UserTotals[]>(`/api/user-metrics?${qs}`);
+        this.userMetrics = data || [];
+        this.userMetricsReady = true;
+      } catch (err) {
+        console.warn('User metrics fetch failed:', err);
+      }
     },
     async fetchMetrics() {
       if (this.signInRequired || !this.dateRange.since || !this.dateRange.until || this.isLoading) {
@@ -333,7 +346,7 @@ export default defineNuxtComponent({
       userMetrics: [] as UserTotals[],
       userMetricsHistory: [] as UserMetricsHistoryEntry[],
       apiError: undefined as string | undefined,
-      showMigrationBanner: true,
+      showMigrationBanner: false,
       config: null as ReturnType<typeof useRuntimeConfig> | null,
       holidayOptions: {
         excludeHolidays: false,
@@ -435,7 +448,7 @@ export default defineNuxtComponent({
       server: true,
       immediate: false,
       query: computed(() => {
-        const options = Options.fromRoute(route.value);
+        const options = Options.fromRoute(route.value, dateRange.value.since, dateRange.value.until);
         return options.toParams();
       })
     });

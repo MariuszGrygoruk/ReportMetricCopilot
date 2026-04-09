@@ -175,7 +175,8 @@ export async function syncMetricsForDate(request: SyncRequest): Promise<SyncResu
 
 /**
  * Sync metrics for a date range.
- * Uses 28-day bulk download and filters to the requested range.
+ * Uses per-day 1-day endpoint (syncMetricsForDate) to avoid relying on the
+ * 28-day bulk download, which returns 404 for some enterprise scopes.
  */
 export async function syncMetricsForDateRange(
   scope: 'organization' | 'enterprise' | 'team-organization' | 'team-enterprise',
@@ -186,31 +187,32 @@ export async function syncMetricsForDateRange(
   teamSlug?: string
 ): Promise<SyncResult[]> {
   const logger = console;
-
-  // Use bulk download (28-day) and filter to requested range
-  const request: MetricsReportRequest = { scope, identifier, teamSlug };
-  const report = await fetchLatestReport(request, headers);
-
   const results: SyncResult[] = [];
-  for (const dayData of report.day_totals) {
-    if (dayData.day < startDate || dayData.day > endDate) continue;
 
-    try {
-      const exists = await hasMetrics(scope, identifier, dayData.day, teamSlug);
-      if (exists) {
-        results.push({ success: true, date: dayData.day, metricsCount: 1 });
-        continue;
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const current = new Date(start);
+
+  logger.info(`Syncing date range ${startDate} → ${endDate} for ${scope}:${identifier} (per-day)`);
+
+  while (current <= end) {
+    const dateStr = current.toISOString().split('T')[0];
+    const result = await syncMetricsForDate({ scope, identifier, date: dateStr, teamSlug, headers });
+    results.push(result);
+    if (!result.success) {
+      // Distinguish data gaps (404 blob) from real errors — log but continue
+      const isDataGap = result.error?.includes('404') || result.error?.includes('No download links');
+      if (isDataGap) {
+        logger.info(`No data for ${dateStr} (data gap on GitHub side), skipping`);
+      } else {
+        logger.warn(`Failed on ${dateStr}: ${result.error}`);
       }
-
-      await saveDayData(scope, identifier, dayData, teamSlug);
-      results.push({ success: true, date: dayData.day, metricsCount: 1 });
-      logger.info(`Saved metrics for ${dayData.day}`);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      results.push({ success: false, date: dayData.day, error: msg, metricsCount: 0 });
     }
+    current.setDate(current.getDate() + 1);
   }
 
+  const saved = results.filter(r => r.success).length;
+  logger.info(`Range sync complete: ${saved}/${results.length} days processed`);
   return results;
 }
 

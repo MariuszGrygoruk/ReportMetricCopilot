@@ -538,40 +538,119 @@ function shiftReportDatesToToday(report: OrgReport): OrgReport {
 
 /**
  * Fetch the latest 28-day metrics report.
- * This is the most efficient endpoint — one API call + one download for 28 days of data.
+ * Tries the 28-day endpoint first; if it returns 404 (not available for this enterprise/org),
+ * falls back to fetching 28 individual 1-day reports in parallel and merging them.
  */
 export async function fetchLatestReport(
   request: MetricsReportRequest,
-  headers: HeadersInit
+  headers: HeadersInit,
+  since?: string,
+  until?: string
 ): Promise<OrgReport> {
-  const { download_links } = await requestDownloadLinks(request, headers, '28-day');
+  // Try 28-day report first
+  try {
+    const { download_links } = await requestDownloadLinks(request, headers, '28-day');
 
-  if (!download_links || download_links.length === 0) {
-    throw new Error('No download links returned from metrics report API');
+    if (!download_links || download_links.length === 0) {
+      throw new Error('No download links returned from metrics report API');
+    }
+
+    const reports = await Promise.all(
+      download_links.map(url => downloadReport(url, request.identifier))
+    );
+
+    const merged = { ...reports[0] };
+    if (reports.length > 1) {
+      merged.day_totals = reports.flatMap(r => r.day_totals);
+    }
+
+    if (isMockMode()) {
+      return shiftReportDatesToToday(merged);
+    }
+
+    return merged;
+  } catch (error: unknown) {
+    // If 28-day report is not available (404), fall back to 1-day reports
+    const statusCode = error && typeof error === 'object' && 'statusCode' in error
+      ? (error as { statusCode: number }).statusCode : 0;
+    const status = error && typeof error === 'object' && 'status' in error
+      ? (error as { status: number }).status : 0;
+
+    if (statusCode !== 404 && status !== 404) {
+      throw error;
+    }
+
+    console.info('[new-api] 28-day report not available, falling back to 1-day reports');
+    return fetchReportFromDailyReports(request, headers, since, until);
+  }
+}
+
+/**
+ * Fetch metrics by downloading individual 1-day reports for each day in the range
+ * and merging them into a single OrgReport.
+ * Used as fallback when the 28-day report endpoint is not available.
+ * NOTE: 1-day report files are ReportDayTotals objects, not OrgReport wrappers.
+ */
+async function fetchReportFromDailyReports(
+  request: MetricsReportRequest,
+  headers: HeadersInit,
+  since?: string,
+  until?: string
+): Promise<OrgReport> {
+  const endDate = until ? new Date(until) : new Date();
+  const startDate = since ? new Date(since) : new Date(endDate.getTime() - 27 * MS_PER_DAY);
+
+  // Build list of days to fetch
+  const days: string[] = [];
+  for (let d = new Date(startDate); d <= endDate; d = new Date(d.getTime() + MS_PER_DAY)) {
+    days.push(toDateString(d));
   }
 
-  // Download all report files and merge day_totals
-  const reports = await Promise.all(
-    download_links.map(url => downloadReport(url, request.identifier))
+  console.info(`[new-api] Fetching ${days.length} daily reports (${days[0]} to ${days[days.length - 1]})`);
+
+  // Fetch download links for all days in parallel
+  const linkResults = await Promise.allSettled(
+    days.map(day => requestDownloadLinks(request, headers, '1-day', day))
   );
 
-  // Merge: use first report as base, combine day_totals from all files
-  const merged = { ...reports[0] };
-  if (reports.length > 1) {
-    merged.day_totals = reports.flatMap(r => r.day_totals);
+  // Download each day's data — 1-day files are ReportDayTotals, not OrgReport
+  const dayTotals: ReportDayTotals[] = [];
+  await Promise.allSettled(
+    linkResults.map(async (linkResult, i) => {
+      if (linkResult.status !== 'fulfilled') return;
+      const { download_links } = linkResult.value;
+      if (!download_links || download_links.length === 0) return;
+      for (const url of download_links) {
+        try {
+          const dayData = await _fetch<ReportDayTotals>(url, { responseType: 'json' });
+          if (dayData && dayData.day) {
+            dayTotals.push(dayData);
+          }
+        } catch {
+          console.warn(`[new-api] Failed to download 1-day report for ${days[i]}`);
+        }
+      }
+    })
+  );
+
+  if (dayTotals.length === 0) {
+    throw new Error('No data available for the requested date range');
   }
 
-  // In mock mode, shift dates to be relative to today so they fall within
-  // the default "last 30 days" window used by sync-status and other queries.
-  if (isMockMode()) {
-    return shiftReportDatesToToday(merged);
-  }
+  dayTotals.sort((a, b) => a.day.localeCompare(b.day));
 
-  return merged;
+  console.info(`[new-api] Assembled ${dayTotals.length} days from daily reports`);
+
+  return {
+    report_start_day: dayTotals[0].day,
+    report_end_day: dayTotals[dayTotals.length - 1].day,
+    day_totals: dayTotals,
+  } as OrgReport;
 }
 
 /**
  * Fetch a single day's metrics report.
+ * 1-day files contain a ReportDayTotals object directly (not OrgReport).
  */
 export async function fetchReportForDate(
   request: MetricsReportRequest,
@@ -584,16 +663,27 @@ export async function fetchReportForDate(
     throw new Error(`No download links returned for day ${day}`);
   }
 
-  const reports = await Promise.all(
-    download_links.map(url => downloadReport(url, request.identifier))
+  // 1-day files are ReportDayTotals objects, not OrgReport wrappers
+  const dayTotals = await Promise.all(
+    download_links.map(url => _fetch<ReportDayTotals>(url, { responseType: 'json' }))
   );
 
-  const merged = { ...reports[0] };
-  if (reports.length > 1) {
-    merged.day_totals = reports.flatMap(r => r.day_totals);
+  // Merge multiple files (large enterprises may split data)
+  const merged: ReportDayTotals = { ...dayTotals[0] };
+  if (dayTotals.length > 1) {
+    for (const dt of dayTotals.slice(1)) {
+      merged.daily_active_users = (merged.daily_active_users || 0) + (dt.daily_active_users || 0);
+      merged.user_initiated_interaction_count += dt.user_initiated_interaction_count;
+      merged.code_generation_activity_count += dt.code_generation_activity_count;
+      merged.code_acceptance_activity_count += dt.code_acceptance_activity_count;
+    }
   }
 
-  return merged;
+  return {
+    report_start_day: day,
+    report_end_day: day,
+    day_totals: [merged],
+  } as OrgReport;
 }
 
 // --- Backward compatibility exports ---

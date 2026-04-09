@@ -7,7 +7,7 @@
  * Can be disabled by setting SYNC_ENABLED=false
  */
 
-import { syncBulk, syncUserMetrics, syncSeats, type SeatsSyncResult } from '../services/sync-service';
+import { syncMetricsForDate, syncUserMetrics, syncSeats, type SeatsSyncResult } from '../services/sync-service';
 
 export default defineTask({
   meta: {
@@ -43,7 +43,12 @@ export default defineTask({
       return { result: 'error', reason: 'no_identifier' };
     }
 
-    logger.info(`Starting daily bulk sync for ${scope}:${identifier}`);
+    // Sync yesterday's data (today's data may not be ready yet)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    logger.info(`Starting daily sync for ${scope}:${identifier} (date: ${yesterdayStr})`);
 
     const headers = {
       'Authorization': `Bearer ${githubToken}`,
@@ -52,14 +57,22 @@ export default defineTask({
     };
 
     try {
-      const result = await syncBulk(
+      const syncResult = await syncMetricsForDate({
         scope,
         identifier,
-        headers,
-        githubTeam || undefined
-      );
+        date: yesterdayStr,
+        teamSlug: githubTeam || undefined,
+        headers
+      });
 
-      logger.info(`Aggregated sync completed: ${result.savedDays} saved, ${result.skippedDays} skipped, ${result.errors.length} errors`);
+      const result = {
+        success: syncResult.success,
+        savedDays: syncResult.success ? 1 : 0,
+        skippedDays: 0,
+        errors: syncResult.error ? [{ date: yesterdayStr, error: syncResult.error }] : []
+      };
+
+      logger.info(`Daily sync completed: success=${result.success}, date=${yesterdayStr}`);
 
       // Also sync per-user metrics
       const userResult = await syncUserMetrics(

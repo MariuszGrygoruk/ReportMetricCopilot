@@ -17,7 +17,7 @@ import {
   fetchLatestUserReport,
   type UserReport
 } from '../services/github-copilot-usage-api';
-import { getLatestUserMetrics } from '../storage/user-metrics-storage';
+import { getLatestUserMetrics, getUserMetricsByDateRange } from '../storage/user-metrics-storage';
 
 export default defineEventHandler(async (event) => {
   const logger = console;
@@ -43,7 +43,9 @@ export default defineEventHandler(async (event) => {
     try {
       const scope = options.scope || 'organization';
       const identifier = options.githubOrg || options.githubEnt || '';
-      const stored = await getLatestUserMetrics(scope, identifier);
+      const stored = options.since && options.until
+        ? await getUserMetricsByDateRange(scope, identifier, options.since, options.until)
+        : await getLatestUserMetrics(scope, identifier);
       if (stored) {
         logger.info(`Returning ${stored.userTotals.length} user metrics entries from storage (${stored.reportStartDay}–${stored.reportEndDay})`);
         return stored.userTotals;

@@ -70,23 +70,9 @@ async function fetchFromNewApi(
     teamSlug: options.githubTeam
   };
 
-  const report = await fetchLatestReport(request, headers);
-  let metrics = transformReportToMetrics(report);
-  let reportData = report.day_totals;
-
-  // Filter by date range if specified
-  if (options.since || options.until) {
-    metrics = metrics.filter(m => {
-      if (options.since && m.date < options.since) return false;
-      if (options.until && m.date > options.until) return false;
-      return true;
-    });
-    reportData = reportData.filter(d => {
-      if (options.since && d.day < options.since) return false;
-      if (options.until && d.day > options.until) return false;
-      return true;
-    });
-  }
+  const report = await fetchLatestReport(request, headers, options.since, options.until);
+  const metrics = transformReportToMetrics(report);
+  const reportData = report.day_totals;
 
   return sortMetricsDataResult({ metrics, reportData });
 }
@@ -231,7 +217,7 @@ async function fetchAndStore(
     teamSlug: options.githubTeam
   };
 
-  const report = await fetchLatestReport(request, headers);
+  const report = await fetchLatestReport(request, headers, options.since, options.until);
   let metrics = transformReportToMetrics(report);
   let reportData = report.day_totals;
 

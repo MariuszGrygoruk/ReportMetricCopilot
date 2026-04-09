@@ -82,6 +82,51 @@ export async function getLatestUserMetrics(
 }
 
 /**
+ * Get user metrics for the snapshot whose report_end_day is closest to (but not after) the given until date.
+ * Falls back to the latest snapshot if no match is found.
+ */
+export async function getUserMetricsByDateRange(
+  scope: string,
+  scopeIdentifier: string,
+  since: string,
+  until: string
+): Promise<{ reportStartDay: string; reportEndDay: string; userTotals: UserTotals[] } | null> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT report_start_day, report_end_day, user_totals
+     FROM user_metrics
+     WHERE scope = $1 AND identifier = $2
+       AND report_start_day >= $3 AND report_end_day <= $4
+     ORDER BY report_end_day DESC LIMIT 1`,
+    [scope, scopeIdentifier, since, until]
+  );
+
+  // If no exact match, fall back to the snapshot closest to the requested until date
+  if (rows.length === 0) {
+    const { rows: fallback } = await pool.query(
+      `SELECT report_start_day, report_end_day, user_totals
+       FROM user_metrics
+       WHERE scope = $1 AND identifier = $2
+         AND report_end_day <= $3
+       ORDER BY report_end_day DESC LIMIT 1`,
+      [scope, scopeIdentifier, until]
+    );
+    if (fallback.length === 0) return null;
+    return {
+      reportStartDay: fallback[0].report_start_day,
+      reportEndDay: fallback[0].report_end_day,
+      userTotals: fallback[0].user_totals
+    };
+  }
+
+  return {
+    reportStartDay: rows[0].report_start_day,
+    reportEndDay: rows[0].report_end_day,
+    userTotals: rows[0].user_totals
+  };
+}
+
+/**
  * Check if user metrics exist for a specific report period.
  */
 export async function hasUserMetrics(
