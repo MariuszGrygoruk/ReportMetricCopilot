@@ -71,6 +71,9 @@ export default defineNuxtConfig({
     }
   },
   nitro: {
+    experimental: {
+      tasks: true
+    },
     plugins: [
       'plugins/http-agent',
       'plugins/db-init',
